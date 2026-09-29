@@ -19,7 +19,7 @@ import { join } from "node:path";
 const BACKEND = "https://chatgpt.com/backend-api";
 const STATUS_KEY = "reset-chatgpt";
 /** Spelled out rather than shown as a glyph: no terminal font carries the OpenAI mark. */
-const STATUS_LABEL = "ChatGPT:";
+const STATUS_LABEL = "⏳ ChatGPT:";
 const WARNING_AT_MS = 24 * 3600 * 1000;
 const URGENT_AT_MS = 2 * 3600 * 1000;
 const TICK_MS = 30_000;
