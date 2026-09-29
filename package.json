@@ -1,6 +1,6 @@
 {
 	"name": "pi-reset-chatgpt",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "pi extension: list and redeem banked ChatGPT/Codex rate-limit resets, with a status-bar countdown to the original weekly reset",
 	"type": "module",
 	"license": "MIT",
