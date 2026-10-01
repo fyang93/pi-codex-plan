@@ -78,23 +78,24 @@ interface Segment {
 
 /** How much of the line to show; renderQuota tries these from fullest to tightest. */
 interface Detail {
+	title: boolean;
 	bar: boolean;
 	resetTime: boolean;
 	deadline: boolean;
 	resets: boolean;
-	/** Windows shown, longest last: 2 is 5h and Week, 1 is Week alone, 0 none. */
+	/** Windows shown, longest last: 2 is 5h and Week, 1 is Week alone. */
 	windows: number;
 }
 
-/** Compact first, then drop from the end of the line, except that Week outlasts 5h; the title goes last. */
+/** Drop the title first, then compact, then drop from the end of the line, except that Week outlasts 5h. */
 const DETAILS: Detail[] = [
-	{ bar: true, resetTime: true, deadline: true, resets: true, windows: 2 },
-	{ bar: false, resetTime: true, deadline: true, resets: true, windows: 2 },
-	{ bar: false, resetTime: false, deadline: true, resets: true, windows: 2 },
-	{ bar: false, resetTime: false, deadline: false, resets: true, windows: 2 },
-	{ bar: false, resetTime: false, deadline: false, resets: false, windows: 2 },
-	{ bar: false, resetTime: false, deadline: false, resets: false, windows: 1 },
-	{ bar: false, resetTime: false, deadline: false, resets: false, windows: 0 },
+	{ title: true, bar: true, resetTime: true, deadline: true, resets: true, windows: 2 },
+	{ title: false, bar: true, resetTime: true, deadline: true, resets: true, windows: 2 },
+	{ title: false, bar: false, resetTime: true, deadline: true, resets: true, windows: 2 },
+	{ title: false, bar: false, resetTime: false, deadline: true, resets: true, windows: 2 },
+	{ title: false, bar: false, resetTime: false, deadline: false, resets: true, windows: 2 },
+	{ title: false, bar: false, resetTime: false, deadline: false, resets: false, windows: 2 },
+	{ title: false, bar: false, resetTime: false, deadline: false, resets: false, windows: 1 },
 ];
 
 /** pi-sub-bar's default window: bold title, plain reset time, a heavy bar, the used percent. */
@@ -121,9 +122,10 @@ function textSegment(text: string, color: Color): Segment {
 }
 
 function segmentsFor(view: QuotaView, detail: Detail, now: number): Segment[] {
-	const segments: Segment[] = [{ plain: "Codex", paint: (paint) => paint.bold(paint.fg("text", "Codex")) }];
+	const segments: Segment[] = [];
+	if (detail.title) segments.push({ plain: "Codex", paint: (paint) => paint.bold(paint.fg("text", "Codex")) });
 	if (view.error) segments.push(textSegment(view.error, "dim"));
-	if (detail.windows) for (const window of windows(view.usage).slice(-detail.windows)) segments.push(windowSegment(window, now, detail));
+	for (const window of windows(view.usage).slice(-detail.windows)) segments.push(windowSegment(window, now, detail));
 	if (detail.resets && view.resets) segments.push(textSegment(`${view.resets} reset${view.resets === 1 ? "" : "s"}`, "muted"));
 	if (detail.deadline && view.deadline && view.deadline > now) {
 		const left = view.deadline - now;
@@ -144,7 +146,7 @@ const minWidth = (segments: Segment[]) => textWidth(segments) + barCount(segment
  * whatever width the text leaves. When nothing fits, an error is cut short, otherwise the line is empty.
  */
 export function renderQuota(view: QuotaView, width: number, paint: Paint, now = Date.now()): string[] {
-	const error = view.error && [...`Codex${DIVIDER}${view.error}`];
+	const error = view.error && [...view.error];
 	const segments = DETAILS.map((detail) => segmentsFor(view, detail, now)).find((candidate) => minWidth(candidate) <= width)
 		?? (error && width > 1 ? [textSegment(`${error.slice(0, width - 1).join("")}…`, "dim")] : []);
 	const bars = barCount(segments);

@@ -30,7 +30,8 @@ test("low remaining turns warning then error; bars shrink to a minimum before th
 	const [narrow] = renderQuota({ usage }, 46, tagged, NOW);
 	assert.match(narrow, /<warning>━━<dim>━━/);  // 59% used of a 4-wide bar, amber with 41% left
 	assert.match(narrow, /<muted><dim>━━━━ <muted>12%/);  // 12% used of a 4-wide bar rounds to empty
-	assert.doesNotMatch(renderQuota({ usage }, 45, tagged, NOW)[0], /━/);
+	assert.match(renderQuota({ usage }, 38, tagged, NOW)[0], /^\*<muted>5h\* <muted>2h30m <muted><dim>━━━━ /);
+	assert.doesNotMatch(renderQuota({ usage }, 37, tagged, NOW)[0], /━/);
 });
 
 test("errors are shown instead of windows, and nothing extra appears without resets or deadline", () => {
@@ -38,19 +39,19 @@ test("errors are shown instead of windows, and nothing extra appears without res
 	assert.doesNotMatch(renderQuota({ usage }, 80, plain, NOW)[0], /reset|spend/);
 });
 
-test("narrower terminals compact first, then drop from the end, keeping Week over 5h and the title last", () => {
+test("narrower terminals drop the title first, then compact, then drop from the end, keeping Week over 5h", () => {
 	const view = { usage, resets: 2, deadline: NOW + 5 * 3_600_000 };
 	for (let width = 1; width <= 140; width++) {
 		for (const line of renderQuota(view, width, plain, NOW)) assert.ok([...line].length <= width, `width ${width}: ${line}`);
 	}
 	const at = (width: number) => renderQuota(view, width, plain, NOW)[0];
 	assert.match(at(72), /^Codex │ 5h 2h30m ━{4} 12% │ Week 3d4h ━{4} 59% │ 2 resets │ spend by 5h$/);
-	assert.equal(at(70), "Codex │ 5h 2h30m 12% │ Week 3d4h 59% │ 2 resets │ spend by 5h");
-	assert.equal(at(60), "Codex │ 5h 12% │ Week 59% │ 2 resets │ spend by 5h");
-	assert.equal(at(45), "Codex │ 5h 12% │ Week 59% │ 2 resets");
-	assert.equal(at(30), "Codex │ 5h 12% │ Week 59%");
-	assert.equal(at(20), "Codex │ Week 59%");
-	assert.equal(at(10), "Codex");
-	assert.equal(at(4), "");
-	assert.equal(renderQuota({ error: "login expired — /login" }, 12, plain, NOW)[0], "Codex │ log…");
+	assert.match(at(70), /^5h 2h30m ━+ 12% │ Week 3d4h ━+ 59% │ 2 resets │ spend by 5h$/);
+	assert.equal(at(62), "5h 2h30m 12% │ Week 3d4h 59% │ 2 resets │ spend by 5h");
+	assert.equal(at(50), "5h 12% │ Week 59% │ 2 resets │ spend by 5h");
+	assert.equal(at(40), "5h 12% │ Week 59% │ 2 resets");
+	assert.equal(at(25), "5h 12% │ Week 59%");
+	assert.equal(at(12), "Week 59%");
+	assert.equal(at(7), "");
+	assert.equal(renderQuota({ error: "login expired — /login" }, 12, plain, NOW)[0], "login expir…");
 });
