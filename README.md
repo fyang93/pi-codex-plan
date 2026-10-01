@@ -1,94 +1,63 @@
-# pi-reset-chatgpt
+# pi-codex-plan
 
 [English](README.md) · [中文](README.zh-CN.md)
 
-A [pi](https://pi.dev) extension that lists the banked Codex rate-limit resets on
-the ChatGPT account you are already logged into, lets you redeem one, and then
-keeps a countdown in the status bar until your weekly window would have reset
-anyway.
+A [pi](https://pi.dev) extension for the ChatGPT (Codex) plan pi is logged into:
 
-## Why the countdown
-
-Redeeming a banked reset restores your quota immediately, but it does **not** move
-the original weekly reset. If your window was going to roll over in 3 days, it
-still rolls over in 3 days — and whatever quota you have not spent by then is
-gone. So the extension records the original reset time before redeeming and shows
-how long you have left to actually use what you just got back.
+- **Limits below the editor** — the 5-hour and weekly windows as bars, how much is left, when each resets, how
+  many banked resets you have, and (after redeeming one) how long until the original weekly reset.
+- **`/codex reset`** — list the banked rate-limit resets and redeem one.
 
 ```
-⏳ ChatGPT: 2d 23h        # plenty of time left
-⏳ ChatGPT: 8h 12m        # amber under 24 hours
-⏳ ChatGPT: 47m           # red under 2 hours
+Codex │ 5h ↻2h30m ━━━━━━━━━━━━━━ 88% rem. │ Week ↻3d4h ━━━━━━━━━ 41% rem. │ 2 resets │ spend by 2d23h
 ```
 
-The countdown appears only after you redeem a reset, and disappears on its own
-once the deadline passes. It never interrupts you — urgency is carried by color,
-not by notifications.
+The line follows your ChatGPT login, not the selected model, so it also shows under routers and other providers.
+Bars turn amber under 50% left and red under 25%; the countdown turns amber under 24 hours and red under 2.
 
 ## Install
 
 ```bash
-pi install git:github.com/fyang93/pi-reset-chatgpt
+pi install git:github.com/fyang93/pi-codex-plan
 ```
 
-Or try it for a single run without installing:
+Requires a ChatGPT login in pi (`/login`, pick ChatGPT). Without one the line stays hidden.
 
-```bash
-pi -e git:github.com/fyang93/pi-reset-chatgpt
-```
-
-Requires a ChatGPT (Codex) login in pi — run `/login` and pick ChatGPT if you
-have not already.
-
-## Usage
+## Commands
 
 | Command | What it does |
 |---|---|
-| `/reset-chatgpt` | List available resets and redeem one |
-| `/reset-chatgpt status` | Show the current countdown as a notification |
-| `/reset-chatgpt clear` | Dismiss the countdown |
+| `/codex` | Refresh the limits now |
+| `/codex reset` | List banked resets (soonest to expire first) and redeem one |
+| `/codex clear` | Dismiss the post-reset countdown |
 
-`/reset-chatgpt` shows every reset your account still has, soonest to expire
-first:
+The limits refresh every five minutes and after each turn (at most once a minute).
 
-```
-2 resets available — soonest to expire first
-  1. Full reset — expires 2026-10-04 10:58 (in 11d 16h)
-  2. Full reset — expires 2026-10-05 13:19 (in 12d 18h)
-```
+Redeeming asks for confirmation with **Cancel as the default**, because it spends the reset for good.
 
-Pick one with `enter`, and a second prompt asks you to confirm. **Cancel is the
-default** — you have to move the selection to `Confirm` deliberately, because
-redeeming spends the reset for good.
+## Why the countdown
+
+Redeeming a banked reset restores your quota immediately, but it does **not** move the original weekly reset.
+Whatever you have not spent by then is gone, so the extension records the original reset time before redeeming
+and shows how long you have left to use what you got back.
 
 ## How it works
 
-The extension reads your ChatGPT OAuth token from pi's own credential store
-(`~/.pi/agent/auth.json`, or `$PI_CODING_AGENT_DIR/auth.json`). It never asks you
-for a token and never sends it anywhere except `chatgpt.com`.
-
-It talks to three endpoints:
+It reads your ChatGPT OAuth token from pi's credential store (`~/.pi/agent/auth.json`, or
+`$PI_CODING_AGENT_DIR/auth.json`) and only talks to `chatgpt.com`:
 
 | Endpoint | Used for |
 |---|---|
-| `GET /backend-api/wham/rate-limit-reset-credits` | List banked resets |
-| `GET /backend-api/wham/usage` | Read the weekly reset time before redeeming |
+| `GET /backend-api/wham/usage` | Rate-limit windows |
+| `GET /backend-api/wham/rate-limit-reset-credits` | Banked resets |
 | `POST /backend-api/wham/rate-limit-reset-credits/consume` | Redeem one reset |
 
-These are the same endpoints the official Codex CLI uses, but they are private
-and undocumented — OpenAI can change them at any time.
+These are the private endpoints the official Codex CLI uses; OpenAI can change them at any time. The countdown is
+stored in `$PI_CODING_AGENT_DIR/codex-plan.json` and deleted once it passes or after `/codex clear`.
 
-The countdown deadline is stored in `$PI_CODING_AGENT_DIR/reset-chatgpt.json`
-(default `~/.pi/agent/reset-chatgpt.json`) so it survives restarts. The file is
-deleted once the deadline passes or you run `/reset-chatgpt clear`.
-
-## Notes
-
-- Banked resets expire 30 days after they are granted. The list is sorted so the
-  one closest to expiring is first.
-- If the confirm step reports `nothing_to_reset`, your quota is not currently
-  limited and no credit was spent.
-- This project is not affiliated with OpenAI.
+Banked resets expire 30 days after they are granted. `nothing_to_reset` means your quota is not limited right now
+and no reset was spent. The bar style follows [pi-sub-bar](https://github.com/marckrenn/pi-sub-bar).
+This project is not affiliated with OpenAI.
 
 ## License
 

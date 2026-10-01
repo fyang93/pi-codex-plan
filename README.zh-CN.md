@@ -1,87 +1,53 @@
-# pi-reset-chatgpt
+# pi-codex-plan
 
 [English](README.md) · [中文](README.zh-CN.md)
 
-一个 [pi](https://pi.dev) 扩展：列出当前已登录 ChatGPT 账号上所有可用的 Codex
-额度重置机会，让你选一个使用，并在使用之后于状态栏显示一个倒计时，提醒你在原本
-的周额度重置时间到来之前把额度用完。
+一个 [pi](https://pi.dev) 扩展，管理 pi 已登录的 ChatGPT（Codex）套餐：
 
-## 为什么要有倒计时
-
-使用一次重置机会会立刻恢复额度，但它**不会**推迟原本的周额度重置时间。如果你的
-额度本来 3 天后自动重置，那么它依然会在 3 天后重置 —— 届时没用完的额度就浪费了。
-所以扩展会在使用重置机会之前先记下原本的重置时间，然后显示你还剩多久可以真正用掉
-这些额度。
+- **输入框下方的额度栏**：5 小时和每周两个窗口的进度条、剩余比例、各自的重置倒计时、可用的重置卡数量，以及兑换重置卡之后距离原周重置的倒计时。
+- **`/codex reset`**：列出可用的重置卡并兑换一张。
 
 ```
-⏳ ChatGPT: 2d 23h        # 充裕
-⏳ ChatGPT: 8h 12m        # 不足 24 小时，转琥珀
-⏳ ChatGPT: 47m           # 不足 2 小时，转红
+Codex │ 5h ↻2h30m ━━━━━━━━━━━━━━ 88% rem. │ Week ↻3d4h ━━━━━━━━━ 41% rem. │ 2 resets │ spend by 2d23h
 ```
 
-倒计时只在使用了重置机会之后出现，到期后会自动消失。它不会弹通知打断你 ——
-紧迫程度只用颜色表达。
+额度栏跟随 ChatGPT 的登录状态，而不是当前选择的模型，所以在路由器或其他服务商的模型下也会显示。剩余低于 50% 变黄、低于 25% 变红；倒计时不足 24 小时变黄、不足 2 小时变红。
 
 ## 安装
 
 ```bash
-pi install git:github.com/fyang93/pi-reset-chatgpt
+pi install git:github.com/fyang93/pi-codex-plan
 ```
 
-或者不安装，只在单次运行中试用：
+需要先在 pi 里登录 ChatGPT（`/login` 选 ChatGPT），未登录时额度栏不显示。
 
-```bash
-pi -e git:github.com/fyang93/pi-reset-chatgpt
-```
-
-需要 pi 中已登录 ChatGPT (Codex) 账号 —— 如果还没登录，先运行 `/login` 并选择
-ChatGPT。
-
-## 用法
+## 命令
 
 | 命令 | 作用 |
 |---|---|
-| `/reset-chatgpt` | 列出可用的重置机会并使用其中一个 |
-| `/reset-chatgpt status` | 以通知形式显示当前倒计时 |
-| `/reset-chatgpt clear` | 关闭倒计时提醒 |
+| `/codex` | 立即刷新额度 |
+| `/codex reset` | 列出重置卡（最快过期的在前）并兑换一张 |
+| `/codex clear` | 关掉兑换后的倒计时 |
 
-`/reset-chatgpt` 会列出账号上所有可用的重置机会，有效截止日期早的排在前面：
+额度每 5 分钟刷新一次，每轮对话结束后也会刷新（最多每分钟一次）。兑换前需要确认，**默认选项是取消**，因为兑换会用掉这张卡。
 
-```
-2 resets available — soonest to expire first
-  1. Full reset — expires 2026-10-04 10:58 (in 11d 16h)
-  2. Full reset — expires 2026-10-05 13:19 (in 12d 18h)
-```
+## 为什么要倒计时
 
-用 `enter` 选中一个之后，会再弹出一个确认框。**默认选中的是 Cancel** —— 必须手动
-把光标移到 `Confirm` 才会真正使用，因为重置机会一旦用掉就无法撤销。
+兑换重置卡会立刻恢复额度，但**不会**推迟原来的周重置时间，到时没用完的额度会作废。所以兑换前会记下原来的周重置时间，并显示还剩多久可以用掉恢复的额度。
 
-## 工作原理
+## 实现
 
-扩展直接从 pi 自己的凭据文件（`~/.pi/agent/auth.json`，或
-`$PI_CODING_AGENT_DIR/auth.json`）读取 ChatGPT 的 OAuth token，不会要求你另外填
-写 token，也不会把它发往 `chatgpt.com` 以外的任何地方。
-
-它使用三个接口：
+从 pi 的凭据存储（`~/.pi/agent/auth.json` 或 `$PI_CODING_AGENT_DIR/auth.json`）读取 ChatGPT OAuth token，只访问 `chatgpt.com`：
 
 | 接口 | 用途 |
 |---|---|
-| `GET /backend-api/wham/rate-limit-reset-credits` | 列出重置机会 |
-| `GET /backend-api/wham/usage` | 在使用前读取原本的周重置时间 |
-| `POST /backend-api/wham/rate-limit-reset-credits/consume` | 使用一次重置机会 |
+| `GET /backend-api/wham/usage` | 速率限制窗口 |
+| `GET /backend-api/wham/rate-limit-reset-credits` | 重置卡 |
+| `POST /backend-api/wham/rate-limit-reset-credits/consume` | 兑换一张重置卡 |
 
-这些接口和官方 Codex CLI 用的是同一套，但属于未公开的私有接口，OpenAI 随时可能
-改动。
+这些是官方 Codex CLI 使用的私有接口，OpenAI 随时可能修改。倒计时保存在 `$PI_CODING_AGENT_DIR/codex-plan.json`，到期或执行 `/codex clear` 后删除。
 
-倒计时的截止时间保存在 `$PI_CODING_AGENT_DIR/reset-chatgpt.json`（默认
-`~/.pi/agent/reset-chatgpt.json`），重启 pi 之后依然有效。到期或执行
-`/reset-chatgpt clear` 后该文件会被删除。
-
-## 说明
-
-- 重置机会在发放后 30 天过期，列表按最快过期的排在前面。
-- 如果确认后返回 `nothing_to_reset`，说明当前额度并未受限，重置机会没有被消耗。
-- 本项目与 OpenAI 无关。
+重置卡在发放 30 天后过期。返回 `nothing_to_reset` 表示当前额度没有受限，不会消耗重置卡。额度栏的样式参考了 [pi-sub-bar](https://github.com/marckrenn/pi-sub-bar)。本项目与 OpenAI 无关。
 
 ## 许可证
 

@@ -1,19 +1,32 @@
 {
-	"name": "pi-reset-chatgpt",
-	"version": "0.1.1",
-	"description": "pi extension: list and redeem banked ChatGPT/Codex rate-limit resets, with a status-bar countdown to the original weekly reset",
+	"name": "pi-codex-plan",
+	"version": "0.2.0",
+	"description": "pi extension: your ChatGPT/Codex plan below the editor — rate-limit windows, banked resets, redeeming one, and the countdown to the original weekly reset",
 	"type": "module",
 	"license": "MIT",
-	"keywords": ["pi-package", "pi-extension", "chatgpt", "codex", "rate-limit"],
+	"keywords": [
+		"pi-package",
+		"pi-extension",
+		"chatgpt",
+		"codex",
+		"rate-limit",
+		"usage",
+		"quota"
+	],
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/fyang93/pi-reset-chatgpt.git"
+		"url": "git+https://github.com/fyang93/pi-codex-plan.git"
 	},
-	"homepage": "https://github.com/fyang93/pi-reset-chatgpt#readme",
+	"homepage": "https://github.com/fyang93/pi-codex-plan#readme",
 	"bugs": {
-		"url": "https://github.com/fyang93/pi-reset-chatgpt/issues"
+		"url": "https://github.com/fyang93/pi-codex-plan/issues"
 	},
 	"pi": {
-		"extensions": ["./src/index.ts"]
+		"extensions": [
+			"./src/index.ts"
+		]
+	},
+	"scripts": {
+		"test": "node --test test/*.test.ts"
 	}
 }

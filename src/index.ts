@@ -1,9 +1,10 @@
 /**
- * pi-reset-chatgpt
+ * pi-codex-plan
  *
- * Lists the banked Codex rate-limit resets on the ChatGPT account pi is logged
- * into, lets you redeem one, and then keeps a countdown in the status bar until
- * the weekly window would have reset on its own.
+ * Shows the ChatGPT/Codex quota of the account pi is logged into below the editor
+ * (whatever model is selected), lists the banked rate-limit resets, lets you
+ * redeem one, and then counts down until the weekly window would have reset on
+ * its own.
  *
  * Why the countdown: redeeming a credit restores your quota now, but it does not
  * move the original weekly reset. Whatever you do not spend before that moment is
@@ -12,19 +13,18 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { formatDuration, type Paint, type QuotaView, renderQuota, type UsageResponse } from "./quota.ts";
 
 const BACKEND = "https://chatgpt.com/backend-api";
-const STATUS_KEY = "reset-chatgpt";
-/** Spelled out rather than shown as a glyph: no terminal font carries the OpenAI mark. */
-const STATUS_LABEL = "⏳ ChatGPT:";
-const WARNING_AT_MS = 24 * 3600 * 1000;
-const URGENT_AT_MS = 2 * 3600 * 1000;
+const WIDGET_KEY = "codex-plan";
+const REFRESH_MS = 5 * 60_000;
+const AFTER_TURN_MIN_MS = 60_000;
 const TICK_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 20_000;
-const USER_AGENT = "pi-reset-chatgpt";
+const USER_AGENT = "pi-codex-plan";
 
 interface CodexAuth {
 	access: string;
@@ -47,21 +47,6 @@ interface ResetCreditsResponse {
 	available_count?: number;
 }
 
-interface RateLimitWindow {
-	used_percent?: number;
-	limit_window_seconds?: number;
-	reset_after_seconds?: number;
-	reset_at?: number;
-}
-
-interface UsageResponse {
-	plan_type?: string;
-	rate_limit?: {
-		primary_window?: RateLimitWindow | null;
-		secondary_window?: RateLimitWindow | null;
-	} | null;
-}
-
 type ConsumeCode = "reset" | "nothing_to_reset" | "no_credit" | "already_redeemed";
 
 interface ConsumeResponse {
@@ -72,7 +57,7 @@ interface ConsumeResponse {
 interface ReminderState {
 	/** Epoch ms of the weekly reset that was already scheduled before redeeming. */
 	deadline: number;
-	/** Epoch ms the credit was redeemed, for `/reset-chatgpt status`. */
+	/** Epoch ms the credit was redeemed. */
 	redeemedAt: number;
 	creditId?: string;
 }
@@ -86,7 +71,15 @@ function authPath(): string {
 }
 
 function statePath(): string {
-	return join(configDir(), "reset-chatgpt.json");
+	return join(configDir(), "codex-plan.json");
+}
+
+async function loggedIn(): Promise<boolean> {
+	try {
+		return Boolean(JSON.parse(await readFile(authPath(), "utf8"))?.["openai-codex"]?.access);
+	} catch {
+		return false;
+	}
 }
 
 async function readAuth(): Promise<CodexAuth> {
@@ -145,23 +138,13 @@ function soonestFirst(credits: ResetCredit[]): ResetCredit[] {
  */
 function weeklyResetAt(usage: UsageResponse): number | undefined {
 	const windows = [usage.rate_limit?.primary_window, usage.rate_limit?.secondary_window].filter(
-		(window): window is RateLimitWindow => Boolean(window) && typeof window?.reset_at === "number",
+		(window) => Boolean(window) && typeof window?.reset_at === "number",
 	);
-	let longest: RateLimitWindow | undefined;
+	let longest: (typeof windows)[number] | undefined;
 	for (const window of windows) {
 		if (!longest || (window.limit_window_seconds ?? 0) > (longest.limit_window_seconds ?? 0)) longest = window;
 	}
 	return longest?.reset_at;
-}
-
-function formatDuration(ms: number): string {
-	const seconds = Math.max(0, Math.floor(ms / 1000));
-	const days = Math.floor(seconds / 86_400);
-	const hours = Math.floor((seconds % 86_400) / 3600);
-	const minutes = Math.floor((seconds % 3600) / 60);
-	if (days > 0) return `${days}d${hours > 0 ? `${hours}h` : ""}`;
-	if (hours > 0) return `${hours}h${minutes > 0 ? `${minutes}m` : ""}`;
-	return `${minutes}m`;
 }
 
 function formatLocal(ms: number): string {
@@ -172,6 +155,8 @@ function formatLocal(ms: number): string {
 
 async function readState(): Promise<ReminderState | undefined> {
 	try {
+		// One-time move from the pi-reset-chatgpt state file.
+		await rename(join(configDir(), "reset-chatgpt.json"), statePath()).catch(() => {});
 		const state = JSON.parse(await readFile(statePath(), "utf8")) as ReminderState;
 		return typeof state?.deadline === "number" ? state : undefined;
 	} catch {
@@ -184,66 +169,102 @@ async function writeState(state: ReminderState): Promise<void> {
 }
 
 export default function (pi: ExtensionAPI) {
-	let timer: ReturnType<typeof setInterval> | undefined;
-	let state: ReminderState | undefined;
+	let view: QuotaView = {};
+	let refreshTimer: ReturnType<typeof setInterval> | undefined;
+	let tickTimer: ReturnType<typeof setInterval> | undefined;
+	let lastRefresh = 0;
+	let refreshing: Promise<void> | undefined;
 
-	const stopTimer = () => {
-		if (timer) clearInterval(timer);
-		timer = undefined;
-	};
+	const paint = (ctx: ExtensionContext): Paint => ({
+		fg: (color, text) => ctx.ui.theme.fg(color, text),
+		bold: (text) => ctx.ui.theme.bold(text),
+	});
 
-	/** Drop the reminder entirely: past the deadline there is nothing left to hurry for. */
-	const clearReminder = async (ctx: ExtensionContext) => {
-		stopTimer();
-		state = undefined;
-		ctx.ui.setStatus(STATUS_KEY, undefined);
-		await rm(statePath(), { force: true }).catch(() => {});
-	};
-
-	const renderStatus = (ctx: ExtensionContext) => {
-		if (!state) return;
-		const remaining = state.deadline - Date.now();
-		if (remaining <= 0) {
-			void clearReminder(ctx);
+	/** The plan line below the editor; hidden while pi is not logged in to ChatGPT. */
+	const render = (ctx: ExtensionContext, show: boolean) => {
+		if (!show) {
+			ctx.ui.setWidget(WIDGET_KEY, undefined);
 			return;
 		}
-		// The whole reminder is one token in a crowded footer, so urgency is carried
-		// by color rather than by extra words.
-		const color = remaining <= URGENT_AT_MS ? "error" : remaining <= WARNING_AT_MS ? "warning" : "accent";
-		ctx.ui.setStatus(STATUS_KEY, ctx.ui.theme.fg(color, `${STATUS_LABEL} ${formatDuration(remaining)}`));
+		ctx.ui.setWidget(WIDGET_KEY, () => ({
+			render: (width: number) => [renderQuota(view, width, paint(ctx))],
+			invalidate: () => {},
+		}), { placement: "belowEditor" });
 	};
 
-	const startReminder = (ctx: ExtensionContext, next: ReminderState) => {
-		stopTimer();
-		state = next;
-		renderStatus(ctx);
-		if (!state) return; // already past the deadline
-		timer = setInterval(() => renderStatus(ctx), TICK_MS);
-		timer.unref?.();
+	/** Fetch usage and banked resets; follows the login, never the selected model. */
+	const refresh = (ctx: ExtensionContext) => {
+		refreshing ??= (async () => {
+			try {
+				if (!(await loggedIn())) {
+					lastRefresh = 0;
+					render(ctx, false);
+					return;
+				}
+				const auth = await readAuth();
+				const [usage, credits] = await Promise.allSettled([
+					api<UsageResponse>(auth, "/wham/usage"),
+					api<ResetCreditsResponse>(auth, "/wham/rate-limit-reset-credits"),
+				]);
+				view = {
+					...view,
+					usage: usage.status === "fulfilled" ? usage.value : view.usage,
+					resets: credits.status === "fulfilled"
+						? (credits.value.credits ?? []).filter((credit) => credit.status === "available").length
+						: view.resets,
+					error: usage.status === "rejected" ? shortError(usage.reason) : undefined,
+				};
+				lastRefresh = Date.now();
+				render(ctx, true);
+			} finally {
+				refreshing = undefined;
+			}
+		})();
+		return refreshing;
+	};
+
+	const stopTimers = () => {
+		if (refreshTimer) clearInterval(refreshTimer);
+		if (tickTimer) clearInterval(tickTimer);
+		refreshTimer = tickTimer = undefined;
+	};
+
+	const setDeadline = async (state: ReminderState | undefined) => {
+		view = { ...view, deadline: state?.deadline };
+		if (!state) await rm(statePath(), { force: true }).catch(() => {});
 	};
 
 	pi.on("session_start", async (_event, ctx) => {
 		if (!ctx.hasUI) return;
 		const saved = await readState();
-		if (!saved) return;
-		if (saved.deadline <= Date.now()) {
-			await clearReminder(ctx);
-			return;
-		}
-		startReminder(ctx, saved);
+		await setDeadline(saved && saved.deadline > Date.now() ? saved : undefined);
+		void refresh(ctx);
+		stopTimers();
+		refreshTimer = setInterval(() => void refresh(ctx), REFRESH_MS);
+		// Countdowns move between refreshes; re-render, and drop the deadline once it passes.
+		tickTimer = setInterval(() => {
+			if (view.deadline && view.deadline <= Date.now()) void setDeadline(undefined);
+			if (lastRefresh) render(ctx, true);
+		}, TICK_MS);
+		refreshTimer.unref?.();
+		tickTimer.unref?.();
+	});
+
+	pi.on("agent_end", async (_event, ctx) => {
+		if (ctx.hasUI && Date.now() - lastRefresh >= AFTER_TURN_MIN_MS) void refresh(ctx);
 	});
 
 	pi.on("session_shutdown", async (_event, ctx) => {
-		stopTimer();
-		ctx.ui.setStatus(STATUS_KEY, undefined);
+		stopTimers();
+		ctx.ui.setWidget(WIDGET_KEY, undefined);
 	});
 
-	pi.registerCommand("reset-chatgpt", {
-		description: "List and redeem banked ChatGPT/Codex rate-limit resets",
+	pi.registerCommand("codex", {
+		description: "Codex plan: refresh the limits, or redeem a banked rate-limit reset",
 		getArgumentCompletions: (prefix: string) => {
 			const items = [
-				{ value: "status", label: "status", description: "Show the current quota countdown" },
-				{ value: "clear", label: "clear", description: "Dismiss the quota countdown" },
+				{ value: "reset", label: "reset", description: "List banked resets and redeem one" },
+				{ value: "clear", label: "clear", description: "Dismiss the post-reset countdown" },
 			].filter((item) => item.value.startsWith(prefix));
 			return items.length > 0 ? items : null;
 		},
@@ -251,25 +272,27 @@ export default function (pi: ExtensionAPI) {
 			const command = args.trim().toLowerCase();
 
 			if (command === "clear") {
-				await clearReminder(ctx);
-				ctx.ui.notify("Quota countdown dismissed.", "info");
+				await setDeadline(undefined);
+				render(ctx, Boolean(lastRefresh));
+				ctx.ui.notify("Countdown dismissed.", "info");
 				return;
 			}
 
-			if (command === "status") {
-				if (!state || state.deadline <= Date.now()) {
-					ctx.ui.notify("No active quota countdown.", "info");
+			if (command !== "reset") {
+				await refresh(ctx);
+				if (!lastRefresh) {
+					ctx.ui.notify("pi is not logged in to a ChatGPT (Codex) account. Run /login and pick ChatGPT.", "error");
 					return;
 				}
-				ctx.ui.notify(
-					`Quota resets on its own at ${formatLocal(state.deadline)} (${formatDuration(state.deadline - Date.now())} left). Anything unused by then is gone.`,
-					"info",
-				);
+				const deadline = view.deadline && view.deadline > Date.now()
+					? ` Weekly window rolls over at ${formatLocal(view.deadline)} (${formatDuration(view.deadline - Date.now())} left).`
+					: "";
+				ctx.ui.notify(`Codex ${view.usage?.plan_type ?? ""} limits refreshed; ${view.resets ?? 0} banked reset(s).${deadline}`, "info");
 				return;
 			}
 
 			if (!ctx.hasUI) {
-				ctx.ui.notify("/reset-chatgpt needs an interactive session.", "error");
+				ctx.ui.notify("/codex reset needs an interactive session.", "error");
 				return;
 			}
 
@@ -361,11 +384,17 @@ export default function (pi: ExtensionAPI) {
 				creditId: chosen.id,
 			};
 			await writeState(next).catch(() => {});
-			startReminder(ctx, next);
+			await setDeadline(next);
+			await refresh(ctx);
 			ctx.ui.notify(
 				`Reset applied. Your weekly window still rolls over at ${formatLocal(next.deadline)} — spend the quota before then.`,
 				"info",
 			);
 		},
 	});
+}
+
+function shortError(reason: unknown): string {
+	const message = reason instanceof Error ? reason.message : String(reason);
+	return /401|403|rejected/.test(message) ? "login expired — /login" : "unavailable";
 }
