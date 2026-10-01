@@ -27,7 +27,7 @@ test("low remaining turns warning then error, and a narrow terminal keeps a mini
 	assert.equal(remainingColor(80), "muted");
 	assert.equal(remainingColor(40), "warning");
 	assert.equal(remainingColor(10), "error");
-	const [narrow] = renderQuota({ usage }, 20, tagged, NOW);
+	const [narrow] = renderQuota({ usage }, 46, tagged, NOW);
 	assert.match(narrow, /<warning>━━<dim>━━/);  // 59% used of a 4-wide bar, amber with 41% left
 	assert.match(narrow, /<muted><dim>━━━━ <muted>12%/);  // 12% used of a 4-wide bar rounds to empty
 });
@@ -35,4 +35,13 @@ test("low remaining turns warning then error, and a narrow terminal keeps a mini
 test("errors are shown instead of windows, and nothing extra appears without resets or deadline", () => {
 	assert.equal(renderQuota({ error: "login expired — /login" }, 80, plain, NOW)[0], "Codex │ login expired — /login");
 	assert.doesNotMatch(renderQuota({ usage }, 80, plain, NOW)[0], /reset|spend/);
+});
+
+test("no line is wider than the terminal; segments that do not fit are dropped from the end", () => {
+	const view = { usage, resets: 2, deadline: NOW + 5 * 3_600_000 };
+	for (let width = 1; width <= 140; width++) {
+		for (const line of renderQuota(view, width, plain, NOW)) assert.ok([...line].length <= width, `width ${width}: ${line}`);
+	}
+	assert.equal(renderQuota(view, 43, plain, NOW)[0], "Codex │ 5h 2h30m ━━━━━━━━━━━━━━━━━━━━━━ 12%");
+	assert.equal(renderQuota(view, 4, plain, NOW)[0], "");
 });

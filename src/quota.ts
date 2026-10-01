@@ -99,7 +99,7 @@ function textSegment(text: string, color: Color): Segment {
 	return { plain: text, paint: (paint) => paint.fg(color, text) };
 }
 
-/** One line fitting `width`: bars share whatever width the text leaves. */
+/** One line fitting `width`: bars share whatever width the text leaves; segments that do not fit are dropped from the end. */
 export function renderQuota(view: QuotaView, width: number, paint: Paint, now = Date.now()): string[] {
 	const segments: Segment[] = [{ plain: "Codex", paint: (paint) => paint.bold(paint.fg("text", "Codex")) }];
 	if (view.error) segments.push(textSegment(view.error, "dim"));
@@ -111,9 +111,11 @@ export function renderQuota(view: QuotaView, width: number, paint: Paint, now = 
 		segments.push(textSegment(`spend by ${formatDuration(left)}`, color));
 	}
 	const divider = " │ ";
-	const textWidth = segments.reduce((sum, segment) => sum + [...segment.plain].length, 0) + divider.length * (segments.length - 1);
-	const bars = segments.filter((segment) => segment.bar !== undefined).length;
-	const barWidth = bars ? Math.max(MIN_BAR, Math.min(MAX_BAR, Math.floor((width - textWidth) / bars))) : 0;
+	const textWidth = () => segments.reduce((sum, segment) => sum + [...segment.plain].length, 0) + divider.length * (segments.length - 1);
+	const bars = () => segments.filter((segment) => segment.bar !== undefined).length;
+	// pi refuses lines wider than the terminal: drop trailing segments until the rest fits.
+	while (segments.length && textWidth() + bars() * MIN_BAR > width) segments.pop();
+	const barWidth = bars() ? Math.max(MIN_BAR, Math.min(MAX_BAR, Math.floor((width - textWidth()) / bars()))) : 0;
 	const line = segments.map((segment) => segment.paint(paint, barWidth)).join(paint.fg("dim", divider));
 	return [line, paint.fg("dim", "─".repeat(Math.max(1, width)))]; // pi-sub-bar's bottom divider
 }
