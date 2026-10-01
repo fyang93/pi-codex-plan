@@ -4,16 +4,16 @@
 
 A [pi](https://pi.dev) extension for the ChatGPT (Codex) plan pi is logged into:
 
-- **Limits below the editor** — the 5-hour and weekly windows as bars, how much is left, when each resets, how
+- **Limits below the editor** — the 5-hour and weekly windows as bars, how much is used, when each resets, how
   many banked resets you have, and (after redeeming one) how long until the original weekly reset.
 - **`/codex reset`** — list the banked rate-limit resets and redeem one.
 
 ```
-Codex │ 5h 2h30m ━━━━━━━━━━━━━━━━━━ 88% │ Week 3d4h ━━━━━━━━━━━━━━━━━ 41% │ 2 resets │ spend by 2d23h
+Codex │ 5h 2h30m ━━━━━━━━━━━━━━━━━━ 12% │ Week 3d4h ━━━━━━━━━━━━━━━━━ 59% │ 2 resets │ spend by 2d23h
 ```
 
 The line follows your ChatGPT login, not the selected model, so it also shows under routers and other providers.
-Bars turn amber under 50% left and red under 25%; the countdown turns amber under 24 hours and red under 2.
+Bars show how much is used and turn amber over 50% and red over 75%; the countdown turns amber under 24 hours and red under 2.
 
 ## Install
 

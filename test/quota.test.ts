@@ -16,9 +16,9 @@ test("windows are shown shortest first with sub-bar labels", () => {
 	assert.equal(formatDuration(3 * 86_400_000 + 4 * 3_600_000), "3d4h");
 });
 
-test("the line fills the width and shows remaining percent, resets and the countdown", () => {
+test("the line fills the width and shows used percent, resets and the countdown", () => {
 	const [line, divider] = renderQuota({ usage, resets: 2, deadline: NOW + 5 * 3_600_000 }, 120, plain, NOW);
-	assert.match(line, /^Codex │ 5h 2h30m ━+ 88% │ Week 3d4h ━+ 41% │ 2 resets │ spend by 5h$/);
+	assert.match(line, /^Codex │ 5h 2h30m ━+ 12% │ Week 3d4h ━+ 59% │ 2 resets │ spend by 5h$/);
 	assert.ok([...line].length <= 120 && [...line].length >= 110);
 	assert.equal(divider, "─".repeat(120));
 });
@@ -28,7 +28,8 @@ test("low remaining turns warning then error, and a narrow terminal keeps a mini
 	assert.equal(remainingColor(40), "warning");
 	assert.equal(remainingColor(10), "error");
 	const [narrow] = renderQuota({ usage }, 20, tagged, NOW);
-	assert.match(narrow, /<warning>━━<dim>━━/);  // 41% of a 4-wide bar
+	assert.match(narrow, /<warning>━━<dim>━━/);  // 59% used of a 4-wide bar, amber with 41% left
+	assert.match(narrow, /<muted><dim>━━━━ <muted>12%/);  // 12% used of a 4-wide bar rounds to empty
 });
 
 test("errors are shown instead of windows, and nothing extra appears without resets or deadline", () => {

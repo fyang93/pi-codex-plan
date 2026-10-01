@@ -76,18 +76,18 @@ interface Segment {
 	bar?: number;
 }
 
-/** pi-sub-bar's default window: bold title, plain reset time, a heavy bar, the remaining percent. */
+/** pi-sub-bar's default window: bold title, plain reset time, a heavy bar, the used percent. */
 function windowSegment(window: RateLimitWindow, now: number): Segment {
-	const remaining = Math.max(0, Math.min(100, Math.round(100 - (window.used_percent ?? 0))));
-	const color = remainingColor(remaining);
+	const used = Math.max(0, Math.min(100, Math.round(window.used_percent ?? 0)));
+	const color = remainingColor(100 - used);
 	const label = windowLabel(window.limit_window_seconds);
 	const reset = typeof window.reset_at === "number" ? formatDuration(window.reset_at * 1000 - now) : "";
-	const pct = `${remaining}%`;
+	const pct = `${used}%`;
 	return {
 		plain: `${label}${reset ? ` ${reset}` : ""}  ${pct}`, // the bar sits before the percent
-		bar: remaining,
+		bar: used,
 		paint: (paint, barWidth) => {
-			const filled = Math.round((remaining / 100) * barWidth);
+			const filled = Math.round((used / 100) * barWidth);
 			const bar = paint.fg(color, "━".repeat(filled)) + paint.fg("dim", "━".repeat(barWidth - filled));
 			const head = paint.bold(paint.fg(color, label)) + (reset ? ` ${paint.fg(color, reset)}` : "");
 			return `${head} ${bar} ${paint.fg(color, pct)}`;
