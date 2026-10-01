@@ -9,7 +9,7 @@ A [pi](https://pi.dev) extension for the ChatGPT (Codex) plan pi is logged into:
 - **`/codex reset`** — list the banked rate-limit resets and redeem one.
 
 ```
-Codex │ 5h ↻2h30m ━━━━━━━━━━━━━━ 88% rem. │ Week ↻3d4h ━━━━━━━━━ 41% rem. │ 2 resets │ spend by 2d23h
+Codex │ 5h 2h30m ━━━━━━━━━━━━━━━━━━ 88% │ Week 3d4h ━━━━━━━━━━━━━━━━━ 41% │ 2 resets │ spend by 2d23h
 ```
 
 The line follows your ChatGPT login, not the selected model, so it also shows under routers and other providers.

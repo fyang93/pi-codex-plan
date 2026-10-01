@@ -187,7 +187,7 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 		ctx.ui.setWidget(WIDGET_KEY, () => ({
-			render: (width: number) => [renderQuota(view, width, paint(ctx))],
+			render: (width: number) => renderQuota(view, width, paint(ctx)),
 			invalidate: () => {},
 		}), { placement: "belowEditor" });
 	};

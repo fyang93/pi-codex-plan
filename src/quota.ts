@@ -49,11 +49,12 @@ export function formatDuration(ms: number): string {
 	return `${minutes}m`;
 }
 
+/** pi-sub-bar's Codex labels: 5h, Day, Week. */
 export function windowLabel(seconds?: number): string {
-	if (!seconds) return "?";
-	if (seconds >= 6 * 86_400) return "Week";
-	if (seconds >= 86_400) return `${Math.round(seconds / 86_400)}d`;
-	return `${Math.round(seconds / 3600)}h`;
+	const hours = Math.round((seconds ?? 0) / 3600);
+	if (hours >= 144) return "Week";
+	if (hours >= 24) return "Day";
+	return `${hours}h`;
 }
 
 /** Shortest window first, as in pi-sub-bar: 5h, then Week. */
@@ -75,21 +76,21 @@ interface Segment {
 	bar?: number;
 }
 
+/** pi-sub-bar's default window: bold title, plain reset time, a heavy bar, the remaining percent. */
 function windowSegment(window: RateLimitWindow, now: number): Segment {
 	const remaining = Math.max(0, Math.min(100, Math.round(100 - (window.used_percent ?? 0))));
 	const color = remainingColor(remaining);
 	const label = windowLabel(window.limit_window_seconds);
-	const reset = typeof window.reset_at === "number" ? `↻${formatDuration(window.reset_at * 1000 - now)}` : "";
-	const head = [label, reset].filter(Boolean).join(" ");
-	const tail = `${remaining}% rem.`;
+	const reset = typeof window.reset_at === "number" ? formatDuration(window.reset_at * 1000 - now) : "";
+	const pct = `${remaining}%`;
 	return {
-		plain: `${head}  ${tail}`, // the bar sits between head and tail
+		plain: `${label}${reset ? ` ${reset}` : ""}  ${pct}`, // the bar sits before the percent
 		bar: remaining,
 		paint: (paint, barWidth) => {
 			const filled = Math.round((remaining / 100) * barWidth);
 			const bar = paint.fg(color, "━".repeat(filled)) + paint.fg("dim", "━".repeat(barWidth - filled));
-			const title = paint.bold(paint.fg(color === "muted" ? "text" : color, label));
-			return `${title}${reset ? ` ${paint.fg(color, reset)}` : ""} ${bar} ${paint.fg(color, tail)}`;
+			const head = paint.bold(paint.fg(color, label)) + (reset ? ` ${paint.fg(color, reset)}` : "");
+			return `${head} ${bar} ${paint.fg(color, pct)}`;
 		},
 	};
 }
@@ -99,19 +100,20 @@ function textSegment(text: string, color: Color): Segment {
 }
 
 /** One line fitting `width`: bars share whatever width the text leaves. */
-export function renderQuota(view: QuotaView, width: number, paint: Paint, now = Date.now()): string {
-	const segments: Segment[] = [textSegment("Codex", "text")];
+export function renderQuota(view: QuotaView, width: number, paint: Paint, now = Date.now()): string[] {
+	const segments: Segment[] = [{ plain: "Codex", paint: (paint) => paint.bold(paint.fg("text", "Codex")) }];
 	if (view.error) segments.push(textSegment(view.error, "dim"));
 	for (const window of windows(view.usage)) segments.push(windowSegment(window, now));
-	if (view.resets) segments.push(textSegment(`${view.resets} reset${view.resets === 1 ? "" : "s"}`, "accent"));
+	if (view.resets) segments.push(textSegment(`${view.resets} reset${view.resets === 1 ? "" : "s"}`, "muted"));
 	if (view.deadline && view.deadline > now) {
 		const left = view.deadline - now;
-		const color: Color = left <= URGENT_AT_MS ? "error" : left <= WARNING_AT_MS ? "warning" : "accent";
+		const color: Color = left <= URGENT_AT_MS ? "error" : left <= WARNING_AT_MS ? "warning" : "muted";
 		segments.push(textSegment(`spend by ${formatDuration(left)}`, color));
 	}
 	const divider = " │ ";
 	const textWidth = segments.reduce((sum, segment) => sum + [...segment.plain].length, 0) + divider.length * (segments.length - 1);
 	const bars = segments.filter((segment) => segment.bar !== undefined).length;
 	const barWidth = bars ? Math.max(MIN_BAR, Math.min(MAX_BAR, Math.floor((width - textWidth) / bars))) : 0;
-	return segments.map((segment) => segment.paint(paint, barWidth)).join(paint.fg("dim", divider));
+	const line = segments.map((segment) => segment.paint(paint, barWidth)).join(paint.fg("dim", divider));
+	return [line, paint.fg("dim", "─".repeat(Math.max(1, width)))]; // pi-sub-bar's bottom divider
 }
