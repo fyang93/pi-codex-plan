@@ -22,8 +22,6 @@ export interface QuotaView {
 	usage?: UsageResponse;
 	/** Banked resets still available. */
 	resets?: number;
-	/** Epoch ms the post-redeem countdown ends, if one is running. */
-	deadline?: number;
 	error?: string;
 }
 
@@ -37,7 +35,6 @@ export interface Paint {
 export const WARNING_AT_MS = 24 * 3600 * 1000;
 export const URGENT_AT_MS = 2 * 3600 * 1000;
 const MIN_BAR = 4;
-const MAX_BAR = 30;
 
 export function formatDuration(ms: number): string {
 	const seconds = Math.max(0, Math.floor(ms / 1000));
@@ -81,7 +78,6 @@ interface Detail {
 	title: boolean;
 	bar: boolean;
 	resetTime: boolean;
-	deadline: boolean;
 	resets: boolean;
 	/** Windows shown, longest last: 2 is 5h and Week, 1 is Week alone. */
 	windows: number;
@@ -89,13 +85,12 @@ interface Detail {
 
 /** Drop the title first, then compact, then drop from the end of the line, except that Week outlasts 5h. */
 const DETAILS: Detail[] = [
-	{ title: true, bar: true, resetTime: true, deadline: true, resets: true, windows: 2 },
-	{ title: false, bar: true, resetTime: true, deadline: true, resets: true, windows: 2 },
-	{ title: false, bar: false, resetTime: true, deadline: true, resets: true, windows: 2 },
-	{ title: false, bar: false, resetTime: false, deadline: true, resets: true, windows: 2 },
-	{ title: false, bar: false, resetTime: false, deadline: false, resets: true, windows: 2 },
-	{ title: false, bar: false, resetTime: false, deadline: false, resets: false, windows: 2 },
-	{ title: false, bar: false, resetTime: false, deadline: false, resets: false, windows: 1 },
+	{ title: true, bar: true, resetTime: true, resets: true, windows: 2 },
+	{ title: false, bar: true, resetTime: true, resets: true, windows: 2 },
+	{ title: false, bar: false, resetTime: true, resets: true, windows: 2 },
+	{ title: false, bar: false, resetTime: false, resets: true, windows: 2 },
+	{ title: false, bar: false, resetTime: false, resets: false, windows: 2 },
+	{ title: false, bar: false, resetTime: false, resets: false, windows: 1 },
 ];
 
 /** pi-sub-bar's default window: bold title, plain reset time, a heavy bar, the used percent. */
@@ -127,11 +122,6 @@ function segmentsFor(view: QuotaView, detail: Detail, now: number): Segment[] {
 	if (view.error) segments.push(textSegment(view.error, "dim"));
 	for (const window of windows(view.usage).slice(-detail.windows)) segments.push(windowSegment(window, now, detail));
 	if (detail.resets && view.resets) segments.push(textSegment(`${view.resets} reset${view.resets === 1 ? "" : "s"}`, "muted"));
-	if (detail.deadline && view.deadline && view.deadline > now) {
-		const left = view.deadline - now;
-		const color: Color = left <= URGENT_AT_MS ? "error" : left <= WARNING_AT_MS ? "warning" : "muted";
-		segments.push(textSegment(`spend by ${formatDuration(left)}`, color));
-	}
 	return segments;
 }
 
@@ -150,7 +140,7 @@ export function renderQuota(view: QuotaView, width: number, paint: Paint, now = 
 	const segments = DETAILS.map((detail) => segmentsFor(view, detail, now)).find((candidate) => minWidth(candidate) <= width)
 		?? (error && width > 1 ? [textSegment(`${error.slice(0, width - 1).join("")}…`, "dim")] : []);
 	const bars = barCount(segments);
-	const barWidth = bars ? Math.max(MIN_BAR, Math.min(MAX_BAR, Math.floor((width - textWidth(segments)) / bars))) : 0;
+	const barWidth = bars ? Math.max(MIN_BAR, Math.floor((width - textWidth(segments)) / bars)) : 0;
 	const line = segments.map((segment) => segment.paint(paint, barWidth)).join(paint.fg("dim", DIVIDER));
 	return [line, paint.fg("dim", "─".repeat(Math.max(1, width)))]; // pi-sub-bar's bottom divider
 }

@@ -6,14 +6,11 @@
  * redeem one, and then counts down until the weekly window would have reset on
  * its own.
  *
- * Why the countdown: redeeming a credit restores your quota now, but it does not
- * move the original weekly reset. Whatever you do not spend before that moment is
- * lost when the window rolls over anyway.
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
-import { readFile, rename, rm, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { formatDuration, type Paint, type QuotaView, renderQuota, type UsageResponse } from "./quota.ts";
@@ -22,7 +19,6 @@ const BACKEND = "https://chatgpt.com/backend-api";
 const WIDGET_KEY = "codex-plan";
 const REFRESH_MS = 5 * 60_000;
 const AFTER_TURN_MIN_MS = 60_000;
-const TICK_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 20_000;
 const USER_AGENT = "pi-codex-plan";
 
@@ -54,24 +50,12 @@ interface ConsumeResponse {
 	windows_reset?: number;
 }
 
-interface ReminderState {
-	/** Epoch ms of the weekly reset that was already scheduled before redeeming. */
-	deadline: number;
-	/** Epoch ms the credit was redeemed. */
-	redeemedAt: number;
-	creditId?: string;
-}
-
 function configDir(): string {
 	return process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
 }
 
 function authPath(): string {
 	return join(configDir(), "auth.json");
-}
-
-function statePath(): string {
-	return join(configDir(), "codex-plan.json");
 }
 
 async function loggedIn(): Promise<boolean> {
@@ -132,46 +116,9 @@ function soonestFirst(credits: ResetCredit[]): ResetCredit[] {
 	return alreadySorted ? credits : [...credits].sort((a, b) => expiryMs(a) - expiryMs(b));
 }
 
-/**
- * The reset that matters for the reminder is the longest window (the weekly one);
- * the 5-hour window rolls over on its own long before the credit is worth tracking.
- */
-function weeklyResetAt(usage: UsageResponse): number | undefined {
-	const windows = [usage.rate_limit?.primary_window, usage.rate_limit?.secondary_window].filter(
-		(window) => Boolean(window) && typeof window?.reset_at === "number",
-	);
-	let longest: (typeof windows)[number] | undefined;
-	for (const window of windows) {
-		if (!longest || (window.limit_window_seconds ?? 0) > (longest.limit_window_seconds ?? 0)) longest = window;
-	}
-	return longest?.reset_at;
-}
-
-function formatLocal(ms: number): string {
-	const date = new Date(ms);
-	const pad = (value: number) => String(value).padStart(2, "0");
-	return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-async function readState(): Promise<ReminderState | undefined> {
-	try {
-		// One-time move from the pi-reset-chatgpt state file.
-		await rename(join(configDir(), "reset-chatgpt.json"), statePath()).catch(() => {});
-		const state = JSON.parse(await readFile(statePath(), "utf8")) as ReminderState;
-		return typeof state?.deadline === "number" ? state : undefined;
-	} catch {
-		return undefined;
-	}
-}
-
-async function writeState(state: ReminderState): Promise<void> {
-	await writeFile(statePath(), `${JSON.stringify(state, null, 2)}\n`, "utf8");
-}
-
 export default function (pi: ExtensionAPI) {
 	let view: QuotaView = {};
 	let refreshTimer: ReturnType<typeof setInterval> | undefined;
-	let tickTimer: ReturnType<typeof setInterval> | undefined;
 	let lastRefresh = 0;
 	let refreshing: Promise<void> | undefined;
 
@@ -225,29 +172,15 @@ export default function (pi: ExtensionAPI) {
 
 	const stopTimers = () => {
 		if (refreshTimer) clearInterval(refreshTimer);
-		if (tickTimer) clearInterval(tickTimer);
-		refreshTimer = tickTimer = undefined;
-	};
-
-	const setDeadline = async (state: ReminderState | undefined) => {
-		view = { ...view, deadline: state?.deadline };
-		if (!state) await rm(statePath(), { force: true }).catch(() => {});
+		refreshTimer = undefined;
 	};
 
 	pi.on("session_start", async (_event, ctx) => {
 		if (!ctx.hasUI) return;
-		const saved = await readState();
-		await setDeadline(saved && saved.deadline > Date.now() ? saved : undefined);
 		void refresh(ctx);
 		stopTimers();
 		refreshTimer = setInterval(() => void refresh(ctx), REFRESH_MS);
-		// Countdowns move between refreshes; re-render, and drop the deadline once it passes.
-		tickTimer = setInterval(() => {
-			if (view.deadline && view.deadline <= Date.now()) void setDeadline(undefined);
-			if (lastRefresh) render(ctx, true);
-		}, TICK_MS);
 		refreshTimer.unref?.();
-		tickTimer.unref?.();
 	});
 
 	pi.on("agent_end", async (_event, ctx) => {
@@ -264,19 +197,11 @@ export default function (pi: ExtensionAPI) {
 		getArgumentCompletions: (prefix: string) => {
 			const items = [
 				{ value: "reset", label: "reset", description: "List banked resets and redeem one" },
-				{ value: "clear", label: "clear", description: "Dismiss the post-reset countdown" },
 			].filter((item) => item.value.startsWith(prefix));
 			return items.length > 0 ? items : null;
 		},
 		handler: async (args, ctx) => {
 			const command = args.trim().toLowerCase();
-
-			if (command === "clear") {
-				await setDeadline(undefined);
-				render(ctx, Boolean(lastRefresh));
-				ctx.ui.notify("Countdown dismissed.", "info");
-				return;
-			}
 
 			if (command !== "reset") {
 				await refresh(ctx);
@@ -284,10 +209,7 @@ export default function (pi: ExtensionAPI) {
 					ctx.ui.notify("pi is not logged in to a ChatGPT (Codex) account. Run /login and pick ChatGPT.", "error");
 					return;
 				}
-				const deadline = view.deadline && view.deadline > Date.now()
-					? ` Weekly window rolls over at ${formatLocal(view.deadline)} (${formatDuration(view.deadline - Date.now())} left).`
-					: "";
-				ctx.ui.notify(`Codex ${view.usage?.plan_type ?? ""} limits refreshed; ${view.resets ?? 0} banked reset(s).${deadline}`, "info");
+				ctx.ui.notify(`Codex ${view.usage?.plan_type ?? ""} limits refreshed; ${view.resets ?? 0} banked reset(s).`, "info");
 				return;
 			}
 
@@ -341,15 +263,6 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			// Read the pre-existing weekly reset first: once the credit is consumed the
-			// backend reports the new window and the original deadline is unrecoverable.
-			let originalWeeklyReset: number | undefined;
-			try {
-				originalWeeklyReset = weeklyResetAt(await api<UsageResponse>(auth, "/wham/usage"));
-			} catch {
-				originalWeeklyReset = undefined;
-			}
-
 			let result: ConsumeResponse;
 			try {
 				result = await api<ConsumeResponse>(auth, "/wham/rate-limit-reset-credits/consume", {
@@ -373,23 +286,8 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			if (originalWeeklyReset === undefined) {
-				ctx.ui.notify("Reset applied. (Could not read the original weekly reset time, so no countdown.)", "info");
-				return;
-			}
-
-			const next: ReminderState = {
-				deadline: originalWeeklyReset * 1000,
-				redeemedAt: Date.now(),
-				creditId: chosen.id,
-			};
-			await writeState(next).catch(() => {});
-			await setDeadline(next);
 			await refresh(ctx);
-			ctx.ui.notify(
-				`Reset applied. Your weekly window still rolls over at ${formatLocal(next.deadline)} — spend the quota before then.`,
-				"info",
-			);
+			ctx.ui.notify("Reset applied.", "info");
 		},
 	});
 }
