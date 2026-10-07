@@ -110,6 +110,12 @@ function expiryMs(credit: ResetCredit): number {
 	return Number.isNaN(parsed) ? Number.POSITIVE_INFINITY : parsed;
 }
 
+function formatLocal(ms: number): string {
+	const date = new Date(ms);
+	const pad = (value: number) => String(value).padStart(2, "0");
+	return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 /** Soonest expiry first. The backend already returns them that way, so only sort when it does not. */
 function soonestFirst(credits: ResetCredit[]): ResetCredit[] {
 	const alreadySorted = credits.every((credit, i) => i === 0 || expiryMs(credits[i - 1]) <= expiryMs(credit));
