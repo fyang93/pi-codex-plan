@@ -58,9 +58,14 @@ function authPath(): string {
 	return join(configDir(), "auth.json");
 }
 
+function chatGptAuth(raw: string): CodexAuth | undefined {
+	const auth = JSON.parse(raw);
+	return (auth?.openai ?? auth?.["openai-codex"]) as CodexAuth | undefined;
+}
+
 async function loggedIn(): Promise<boolean> {
 	try {
-		return Boolean(JSON.parse(await readFile(authPath(), "utf8"))?.["openai-codex"]?.access);
+		return Boolean(chatGptAuth(await readFile(authPath(), "utf8"))?.access);
 	} catch {
 		return false;
 	}
@@ -73,7 +78,7 @@ async function readAuth(): Promise<CodexAuth> {
 	} catch {
 		throw new Error("No pi credentials found. Log in to ChatGPT in pi first (/login).");
 	}
-	const auth = JSON.parse(raw)?.["openai-codex"] as CodexAuth | undefined;
+	const auth = chatGptAuth(raw);
 	if (!auth?.access) {
 		throw new Error("pi is not logged in to a ChatGPT (Codex) account. Run /login and pick ChatGPT.");
 	}
