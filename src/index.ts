@@ -10,7 +10,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { formatDuration, type Paint, type QuotaView, renderQuota, type UsageResponse } from "./quota.ts";
@@ -24,6 +24,8 @@ const USER_AGENT = "pi-codex-plan";
 
 interface CodexAuth {
 	access: string;
+	refresh?: string;
+	clientId?: string;
 	accountId?: string;
 	expires?: number;
 }
@@ -65,7 +67,8 @@ function chatGptAuth(raw: string): CodexAuth | undefined {
 
 async function loggedIn(): Promise<boolean> {
 	try {
-		return Boolean(chatGptAuth(await readFile(authPath(), "utf8"))?.access);
+		const auth = chatGptAuth(await readFile(authPath(), "utf8"));
+		return Boolean(auth?.access || auth?.refresh);
 	} catch {
 		return false;
 	}
@@ -79,9 +82,26 @@ async function readAuth(): Promise<CodexAuth> {
 		throw new Error("No pi credentials found. Log in to ChatGPT in pi first (/login).");
 	}
 	const auth = chatGptAuth(raw);
-	if (!auth?.access) {
+	if (!auth?.access && !auth?.refresh) {
 		throw new Error("pi is not logged in to a ChatGPT (Codex) account. Run /login and pick ChatGPT.");
 	}
+	if (auth.expires && auth.expires <= Date.now() && auth.refresh && auth.clientId) {
+		const response = await fetch("https://auth.openai.com/api/accounts/oauth/token", {
+			method: "POST",
+			headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded" },
+			body: new URLSearchParams({ grant_type: "refresh_token", client_id: auth.clientId, refresh_token: auth.refresh, resource: "https://api.openai.com/v1" }),
+			signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+		});
+		if (!response.ok) throw new Error(`OpenAI OAuth refresh failed (HTTP ${response.status}). Re-login with /login.`);
+		const token = await response.json() as { access_token?: string; refresh_token?: string; expires_in?: number };
+		if (!token.access_token || !token.refresh_token || typeof token.expires_in !== "number") throw new Error("OpenAI OAuth refresh returned invalid credentials. Re-login with /login.");
+		const updated = { ...auth, access: token.access_token, refresh: token.refresh_token, expires: Date.now() + token.expires_in * 1000 - 180_000 };
+		const stored = JSON.parse(raw);
+		stored.openai = updated;
+		await writeFile(authPath(), JSON.stringify(stored, null, 2) + "\n");
+		return updated;
+	}
+	if (!auth.access) throw new Error("OpenAI OAuth credential needs refresh. Re-login with /login.");
 	return auth;
 }
 
