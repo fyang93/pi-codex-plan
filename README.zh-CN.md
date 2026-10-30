@@ -19,7 +19,9 @@ Codex │ 5h 2h30m ━━━━━━━━━━━━━━━━━━ 12% �
 pi install git:github.com/fyang93/pi-codex-plan
 ```
 
-需要先在 pi 里登录 ChatGPT（`/login` 选 ChatGPT），未登录时额度栏不显示。
+需要先通过 **`openai-codex`** 登录 ChatGPT：在 pi 里运行 `/login`，选择 **OpenAI Codex (legacy)**（即 `openai-codex` provider）。未登录此通道时，额度栏不显示。
+
+虽然新版 pi 推荐通过 **OpenAI → Sign in with ChatGPT** 调用模型，但这种登录不能替代本扩展所需的 `openai-codex` 登录：它的 OAuth token 会被本扩展使用的额度和重置卡查询接口拒绝。请保留 `openai-codex` 登录，用于查询额度和兑换重置卡；模型调用仍可使用 `openai` 或任意其他 provider。
 
 ## 命令
 
@@ -37,7 +39,7 @@ pi install git:github.com/fyang93/pi-codex-plan
 
 ## 实现
 
-从 pi 的凭据存储（`~/.pi/agent/auth.json` 或 `$PI_CODING_AGENT_DIR/auth.json`）读取 ChatGPT OAuth token，只访问 `chatgpt.com`：
+从 pi 的凭据存储（`~/.pi/agent/auth.json` 或 `$PI_CODING_AGENT_DIR/auth.json`）中的 **`openai-codex` 条目**读取 ChatGPT OAuth token，只访问 `chatgpt.com`：
 
 | 接口 | 用途 |
 |---|---|

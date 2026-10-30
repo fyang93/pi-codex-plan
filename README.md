@@ -21,7 +21,13 @@ Bars show how much is used and turn amber over 50% and red over 75%.
 pi install git:github.com/fyang93/pi-codex-plan
 ```
 
-Requires a ChatGPT login in pi (`/login`, pick ChatGPT). Without one the line stays hidden.
+Requires a ChatGPT login through **`openai-codex`**: run `/login` and select **OpenAI Codex (legacy)**
+(the `openai-codex` provider). Without that login the line stays hidden.
+
+Although newer pi versions recommend **OpenAI → Sign in with ChatGPT** for model calls, that login does not
+replace `openai-codex` for this extension: its OAuth token is rejected by the quota and reset-credit query
+endpoints used here. Keep the `openai-codex` login for quota queries and reset redemption; you can still use
+`openai` or any other provider for model calls.
 
 ## Commands
 
@@ -36,8 +42,8 @@ Redeeming asks for confirmation with **Cancel as the default**, because it spend
 
 ## How it works
 
-It reads your ChatGPT OAuth token from pi's credential store (`~/.pi/agent/auth.json`, or
-`$PI_CODING_AGENT_DIR/auth.json`) and only talks to `chatgpt.com`:
+It reads the ChatGPT OAuth token from the **`openai-codex` entry** in pi's credential store
+(`~/.pi/agent/auth.json`, or `$PI_CODING_AGENT_DIR/auth.json`) and only talks to `chatgpt.com`:
 
 | Endpoint | Used for |
 |---|---|
