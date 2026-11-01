@@ -14,6 +14,7 @@ Codex │ 5h 2h30m ━━━━━━━━━━━━━━━━━━ 12% �
 
 The line follows your ChatGPT login, not the selected model, so it also shows under routers and other providers.
 Bars show how much is used and turn amber over 50% and red over 75%.
+The reset count turns amber if any available reset expires within 14 days, or red within 7 days (inclusive).
 
 ## Install
 

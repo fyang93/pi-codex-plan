@@ -22,6 +22,8 @@ export interface QuotaView {
 	usage?: UsageResponse;
 	/** Banked resets still available. */
 	resets?: number;
+	/** Earliest available reset expiry, in epoch milliseconds. */
+	resetExpiresAt?: number;
 	error?: string;
 }
 
@@ -121,7 +123,11 @@ function segmentsFor(view: QuotaView, detail: Detail, now: number): Segment[] {
 	if (detail.title) segments.push({ plain: "Codex", paint: (paint) => paint.bold(paint.fg("text", "Codex")) });
 	if (view.error) segments.push(textSegment(view.error, "dim"));
 	for (const window of windows(view.usage).slice(-detail.windows)) segments.push(windowSegment(window, now, detail));
-	if (detail.resets && view.resets) segments.push(textSegment(`${view.resets} reset${view.resets === 1 ? "" : "s"}`, "muted"));
+	if (detail.resets && view.resets) {
+		const remaining = (view.resetExpiresAt ?? Infinity) - now;
+		const color = remaining <= 7 * 86_400_000 ? "error" : remaining <= 14 * 86_400_000 ? "warning" : "muted";
+		segments.push(textSegment(`${view.resets} reset${view.resets === 1 ? "" : "s"}`, color));
+	}
 	return segments;
 }
 

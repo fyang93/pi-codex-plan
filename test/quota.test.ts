@@ -34,6 +34,30 @@ test("low remaining turns warning then error; bars shrink to a minimum before th
 	assert.doesNotMatch(renderQuota({ usage }, 37, tagged, NOW)[0], /━/);
 });
 
+test("reset counts warn within two weeks and become urgent within one week", () => {
+	const day = 86_400_000;
+	for (const [expiresIn, color] of [
+		[undefined, "muted"],
+		[Infinity, "muted"],
+		[NaN, "muted"],
+		[14 * day + 1, "muted"],
+		[14 * day, "warning"],
+		[10 * day, "warning"],
+		[7 * day + 1, "warning"],
+		[7 * day, "error"],
+		[day, "error"],
+		[0, "error"],
+	] as const) {
+		const resetExpiresAt = expiresIn === undefined ? undefined : NOW + expiresIn;
+		const [line] = renderQuota({ usage, resets: 2, resetExpiresAt }, 120, tagged, NOW);
+		assert.ok(line.endsWith(`<${color}>2 resets`), `expires in ${expiresIn}: ${line}`);
+	}
+	const view = { resets: 1, resetExpiresAt: NOW + 8 * day };
+	assert.match(renderQuota(view, 40, tagged, NOW)[0], /<warning>1 reset$/);
+	assert.match(renderQuota(view, 40, tagged, NOW + day)[0], /<error>1 reset$/);
+	assert.doesNotMatch(renderQuota({ resets: 0, resetExpiresAt: NOW }, 40, tagged, NOW)[0], /reset/);
+});
+
 test("errors are shown instead of windows, and optional reset counts are omitted", () => {
 	assert.equal(renderQuota({ error: "login expired — /login" }, 80, plain, NOW)[0], "Codex │ login expired — /login");
 	assert.doesNotMatch(renderQuota({ usage }, 80, plain, NOW)[0], /reset|spend/);

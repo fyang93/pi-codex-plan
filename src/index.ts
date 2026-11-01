@@ -159,12 +159,14 @@ export default function (pi: ExtensionAPI) {
 					api<UsageResponse>(auth, "/wham/usage"),
 					api<ResetCreditsResponse>(auth, "/wham/rate-limit-reset-credits"),
 				]);
+				const available = credits.status === "fulfilled"
+					? (credits.value.credits ?? []).filter((credit) => credit.status === "available")
+					: undefined;
 				view = {
 					...view,
 					usage: usage.status === "fulfilled" ? usage.value : view.usage,
-					resets: credits.status === "fulfilled"
-						? (credits.value.credits ?? []).filter((credit) => credit.status === "available").length
-						: view.resets,
+					resets: available ? available.length : view.resets,
+					resetExpiresAt: available ? Math.min(...available.map(expiryMs)) : view.resetExpiresAt,
 					error: usage.status === "rejected" ? shortError(usage.reason) : undefined,
 				};
 				lastRefresh = Date.now();
