@@ -11,14 +11,16 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { formatDuration, type Paint, type QuotaView, renderQuota, type UsageResponse } from "./quota.ts";
+import { accountKey, agentDir, sharedRefresh } from "./shared.ts";
 
 const BACKEND = "https://chatgpt.com/backend-api";
 const WIDGET_KEY = "codex-plan";
 const REFRESH_MS = 5 * 60_000;
 const AFTER_TURN_MIN_MS = 60_000;
+// The periodic poll only fetches when no session has refreshed within (almost) a full period.
+const TIMER_MIN_AGE_MS = REFRESH_MS - 5_000;
 const REQUEST_TIMEOUT_MS = 20_000;
 const USER_AGENT = "pi-codex-plan";
 
@@ -50,12 +52,8 @@ interface ConsumeResponse {
 	windows_reset?: number;
 }
 
-function configDir(): string {
-	return process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
-}
-
 function authPath(): string {
-	return join(configDir(), "auth.json");
+	return join(agentDir(), "auth.json");
 }
 
 async function loggedIn(): Promise<boolean> {
@@ -125,8 +123,10 @@ function soonestFirst(credits: ResetCredit[]): ResetCredit[] {
 export default function (pi: ExtensionAPI) {
 	let view: QuotaView = {};
 	let refreshTimer: ReturnType<typeof setInterval> | undefined;
-	let lastRefresh = 0;
+	let hasLogin = false;
 	let refreshing: Promise<void> | undefined;
+	// Shared by every pi session, so many open sessions cost no more requests than one.
+	const shared = sharedRefresh<QuotaView>("codex-plan-usage");
 
 	const paint = (ctx: ExtensionContext): Paint => ({
 		fg: (color, text) => ctx.ui.theme.fg(color, text),
@@ -145,37 +145,53 @@ export default function (pi: ExtensionAPI) {
 		}), { placement: "belowEditor" });
 	};
 
-	/** Fetch usage and banked resets; follows the login, never the selected model. */
-	const refresh = (ctx: ExtensionContext) => {
+	const fetchView = async (auth: CodexAuth, previous: QuotaView = {}): Promise<{ view: QuotaView }> => {
+		const [usage, credits] = await Promise.allSettled([
+			api<UsageResponse>(auth, "/wham/usage"),
+			api<ResetCreditsResponse>(auth, "/wham/rate-limit-reset-credits"),
+		]);
+		const available = credits.status === "fulfilled"
+			? (credits.value.credits ?? []).filter((credit) => credit.status === "available")
+			: undefined;
+		return { view: {
+			...previous,
+			usage: usage.status === "fulfilled" ? usage.value : previous.usage,
+			resets: available ? available.length : previous.resets,
+			resetExpiresAt: available ? Math.min(...available.map(expiryMs)) : previous.resetExpiresAt,
+			error: usage.status === "rejected" ? shortError(usage.reason) : undefined,
+		} };
+	};
+
+	/**
+	 * Show usage and banked resets; follows the login, never the selected model. Only queries the
+	 * backend if no pi session has done so within `minAge`; otherwise the shared snapshot is shown.
+	 */
+	const refresh = (ctx: ExtensionContext, minAge = AFTER_TURN_MIN_MS) => {
 		refreshing ??= (async () => {
 			try {
-				if (!(await loggedIn())) {
-					lastRefresh = 0;
+				hasLogin = await loggedIn();
+				if (!hasLogin) {
+					view = {};
+					shared.forget();
 					render(ctx, false);
 					return;
 				}
 				const auth = await readAuth();
-				const [usage, credits] = await Promise.allSettled([
-					api<UsageResponse>(auth, "/wham/usage"),
-					api<ResetCreditsResponse>(auth, "/wham/rate-limit-reset-credits"),
-				]);
-				const available = credits.status === "fulfilled"
-					? (credits.value.credits ?? []).filter((credit) => credit.status === "available")
-					: undefined;
-				view = {
-					...view,
-					usage: usage.status === "fulfilled" ? usage.value : view.usage,
-					resets: available ? available.length : view.resets,
-					resetExpiresAt: available ? Math.min(...available.map(expiryMs)) : view.resetExpiresAt,
-					error: usage.status === "rejected" ? shortError(usage.reason) : undefined,
-				};
-				lastRefresh = Date.now();
+				const result = await shared.refresh(accountKey(auth.accountId ?? auth.access), minAge,
+					previous => fetchView(auth, previous));
+				view = result.view ?? {};
 				render(ctx, true);
 			} finally {
 				refreshing = undefined;
 			}
 		})();
 		return refreshing;
+	};
+
+	/** For explicit requests and after redeeming: always query the backend. */
+	const refreshNow = async (ctx: ExtensionContext) => {
+		await refreshing?.catch(() => {});
+		await refresh(ctx, 0);
 	};
 
 	const stopTimers = () => {
@@ -187,12 +203,12 @@ export default function (pi: ExtensionAPI) {
 		if (!ctx.hasUI) return;
 		void refresh(ctx);
 		stopTimers();
-		refreshTimer = setInterval(() => void refresh(ctx), REFRESH_MS);
+		refreshTimer = setInterval(() => void refresh(ctx, TIMER_MIN_AGE_MS), REFRESH_MS);
 		refreshTimer.unref?.();
 	});
 
 	pi.on("agent_end", async (_event, ctx) => {
-		if (ctx.hasUI && Date.now() - lastRefresh >= AFTER_TURN_MIN_MS) void refresh(ctx);
+		if (ctx.hasUI) void refresh(ctx);
 	});
 
 	pi.on("session_shutdown", async (_event, ctx) => {
@@ -212,8 +228,8 @@ export default function (pi: ExtensionAPI) {
 			const command = args.trim().toLowerCase();
 
 			if (command !== "reset") {
-				await refresh(ctx);
-				if (!lastRefresh) {
+				await refreshNow(ctx);
+				if (!hasLogin) {
 					ctx.ui.notify("pi is not logged in to a ChatGPT (Codex) account. Run /login and pick ChatGPT.", "error");
 					return;
 				}
@@ -294,7 +310,7 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			await refresh(ctx);
+			await refreshNow(ctx);
 			ctx.ui.notify("Reset applied.", "info");
 		},
 	});

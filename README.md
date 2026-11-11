@@ -37,7 +37,9 @@ endpoints used here. Keep the `openai-codex` login for quota queries and reset r
 | `/codex` | Refresh the limits now |
 | `/codex reset` | List banked resets (soonest to expire first) and redeem one |
 
-The limits refresh every five minutes and after each turn (at most once a minute).
+The limits refresh every five minutes and after each turn (at most once a minute). All open pi sessions
+share one snapshot (`codex-plan-usage.json` in the pi agent directory, guarded by a lock file), so running
+many sessions sends no more requests than running one. `/codex` always queries the backend.
 
 Redeeming asks for confirmation with **Cancel as the default**, because it spends the reset for good.
 
