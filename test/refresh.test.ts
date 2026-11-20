@@ -76,10 +76,9 @@ test("fast toggles the animated title and priority tier without fetching quota",
 	const animated = s.widget()![0];
 	assert.match(animated, /\x1b\[38;2;/);
 	assert.equal(animated.replace(/\x1b\[[0-9;]+m/g, ""), standard);
-	await s.command("fast status");
 	assert.deepEqual(s.request("openai-codex", "openai-codex-responses"), { stream: true, service_tier: "priority" });
 	assert.equal(s.request("other", "openai-responses"), undefined);
-	await s.command("fast off");
+	await s.command("fast");
 	assert.equal(s.request("openai", "openai-responses"), undefined);
 	assert.equal(s.widget()![0], standard);
 	assert.equal(app.refreshes(), 1);

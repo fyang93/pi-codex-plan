@@ -240,7 +240,6 @@ export default function (pi: ExtensionAPI) {
 		getArgumentCompletions: (prefix: string) => {
 			const items = [
 				{ value: "fast", label: "fast", description: "Toggle priority processing (may cost more)" },
-				...["on", "off", "status"].map(arg => ({ value: `fast ${arg}`, label: `fast ${arg}` })),
 				{ value: "reset", label: "reset", description: "List banked resets and redeem one" },
 			].filter((item) => item.value.startsWith(prefix));
 			return items.length > 0 ? items : null;
@@ -248,21 +247,14 @@ export default function (pi: ExtensionAPI) {
 		handler: async (args, ctx) => {
 			const command = args.trim().toLowerCase();
 
-			const [subcommand, option, extra] = command.split(/\s+/);
-			if (subcommand === "fast") {
-				if (extra || (option && !["on", "off", "status"].includes(option))) {
-					ctx.ui.notify("Usage: /codex fast [on|off|status]", "warning");
-					return;
-				}
-				if (option !== "status") {
-					fast = option ? option === "on" : !fast;
-					if (ctx.hasUI) render(ctx, hasLogin);
-				}
-				ctx.ui.notify(fast ? "Codex fast mode on for supported models (priority processing may cost more)." : "Codex fast mode off.", "info");
+			if (command === "fast") {
+				fast = !fast;
+				if (ctx.hasUI) render(ctx, hasLogin);
+				ctx.ui.notify(fast ? "Codex fast mode on (priority processing may cost more)." : "Codex fast mode off.", "info");
 				return;
 			}
 
-			if (command !== "reset") {
+				if (command !== "reset") {
 				await refreshNow(ctx);
 				if (!hasLogin) {
 					ctx.ui.notify("pi is not logged in to a ChatGPT (Codex) account. Run /login and pick ChatGPT.", "error");
