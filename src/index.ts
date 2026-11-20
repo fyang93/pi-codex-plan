@@ -13,6 +13,7 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { formatDuration, type Paint, type QuotaView, renderQuota, type UsageResponse } from "./quota.ts";
+import { codexShimmer } from "./shimmer.ts";
 import { accountKey, agentDir, sharedRefresh } from "./shared.ts";
 
 const BACKEND = "https://chatgpt.com/backend-api";
@@ -121,6 +122,15 @@ function soonestFirst(credits: ResetCredit[]): ResetCredit[] {
 }
 
 export default function (pi: ExtensionAPI) {
+	let fast = false;
+	pi.on("before_provider_request", ({ payload }, { model }) => {
+		if (!fast || !model || !payload || typeof payload !== "object" || Array.isArray(payload)) return;
+		if ((model.provider === "openai" && model.api === "openai-responses") ||
+			(model.provider === "openai-codex" && model.api === "openai-codex-responses")) {
+			return { ...payload, service_tier: "priority" };
+		}
+	});
+
 	let view: QuotaView = {};
 	let refreshTimer: ReturnType<typeof setInterval> | undefined;
 	let hasLogin = false;
@@ -139,10 +149,18 @@ export default function (pi: ExtensionAPI) {
 			ctx.ui.setWidget(WIDGET_KEY, undefined);
 			return;
 		}
-		ctx.ui.setWidget(WIDGET_KEY, () => ({
-			render: (width: number) => renderQuota(view, width, paint(ctx)),
-			invalidate: () => {},
-		}), { placement: "belowEditor" });
+		ctx.ui.setWidget(WIDGET_KEY, (tui) => {
+			const style = paint(ctx);
+			const start = Date.now();
+			if (fast) style.codexTitle = () => codexShimmer(Date.now() - start);
+			const timer = fast ? setInterval(() => tui.requestRender(), 50) : undefined;
+			timer?.unref?.();
+			return {
+				render: (width: number) => renderQuota(view, width, style),
+				invalidate: () => {},
+				dispose: () => clearInterval(timer),
+			};
+		}, { placement: "belowEditor" });
 	};
 
 	const fetchView = async (auth: CodexAuth, previous: QuotaView = {}): Promise<{ view: QuotaView }> => {
@@ -200,6 +218,7 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	pi.on("session_start", async (_event, ctx) => {
+		fast = false;
 		if (!ctx.hasUI) return;
 		void refresh(ctx);
 		stopTimers();
@@ -217,15 +236,31 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("codex", {
-		description: "Codex plan: refresh the limits, or redeem a banked rate-limit reset",
+		description: "Codex plan: refresh limits, redeem a reset, or toggle fast mode",
 		getArgumentCompletions: (prefix: string) => {
 			const items = [
+				{ value: "fast", label: "fast", description: "Toggle priority processing (may cost more)" },
+				...["on", "off", "status"].map(arg => ({ value: `fast ${arg}`, label: `fast ${arg}` })),
 				{ value: "reset", label: "reset", description: "List banked resets and redeem one" },
 			].filter((item) => item.value.startsWith(prefix));
 			return items.length > 0 ? items : null;
 		},
 		handler: async (args, ctx) => {
 			const command = args.trim().toLowerCase();
+
+			const [subcommand, option, extra] = command.split(/\s+/);
+			if (subcommand === "fast") {
+				if (extra || (option && !["on", "off", "status"].includes(option))) {
+					ctx.ui.notify("Usage: /codex fast [on|off|status]", "warning");
+					return;
+				}
+				if (option !== "status") {
+					fast = option ? option === "on" : !fast;
+					if (ctx.hasUI) render(ctx, hasLogin);
+				}
+				ctx.ui.notify(fast ? "Codex fast mode on for supported models (priority processing may cost more)." : "Codex fast mode off.", "info");
+				return;
+			}
 
 			if (command !== "reset") {
 				await refreshNow(ctx);

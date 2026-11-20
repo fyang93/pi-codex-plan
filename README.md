@@ -35,6 +35,7 @@ endpoints used here. Keep the `openai-codex` login for quota queries and reset r
 | Command | What it does |
 |---|---|
 | `/codex` | Refresh the limits now |
+| `/codex fast` | Toggle priority processing for this session (off by default). Use `fast on`, `fast off`, or `fast status` after `/codex` for explicit control. Supported OpenAI/Codex Responses models may consume more credits or incur higher API charges. |
 | `/codex reset` | List banked resets (soonest to expire first) and redeem one |
 
 The limits refresh every five minutes and after each turn (at most once a minute). All open pi sessions

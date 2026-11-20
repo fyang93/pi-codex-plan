@@ -48,6 +48,7 @@ async function setup(t: TestContext) {
 		} };
 		return {
 			widget: () => widget,
+			request: (provider: string, api: string) => handlers.get("before_provider_request")({ payload: { stream: true } }, { model: { provider, api } }),
 			notifications,
 			start: async () => { handlers.get("session_start")({}, ctx); tick = poll; await settle(); },
 			turn: async () => { handlers.get("agent_end")({}, ctx); await settle(); },
@@ -65,6 +66,24 @@ async function setup(t: TestContext) {
 		refreshes: () => fetchMock.mock.callCount() / 2,
 	};
 }
+
+test("fast toggles the animated title and priority tier without fetching quota", async (t) => {
+	const app = await setup(t);
+	const s = app.session();
+	await s.start();
+	const standard = s.widget()![0];
+	await s.command("fast");
+	const animated = s.widget()![0];
+	assert.match(animated, /\x1b\[38;2;/);
+	assert.equal(animated.replace(/\x1b\[[0-9;]+m/g, ""), standard);
+	await s.command("fast status");
+	assert.deepEqual(s.request("openai-codex", "openai-codex-responses"), { stream: true, service_tier: "priority" });
+	assert.equal(s.request("other", "openai-responses"), undefined);
+	await s.command("fast off");
+	assert.equal(s.request("openai", "openai-responses"), undefined);
+	assert.equal(s.widget()![0], standard);
+	assert.equal(app.refreshes(), 1);
+});
 
 test("sessions share one snapshot instead of each querying the backend", async (t) => {
 	const app = await setup(t);

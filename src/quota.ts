@@ -32,6 +32,7 @@ export type Color = "text" | "muted" | "dim" | "warning" | "error" | "accent";
 export interface Paint {
 	fg(color: Color, text: string): string;
 	bold(text: string): string;
+	codexTitle?(): string;
 }
 
 export const WARNING_AT_MS = 24 * 3600 * 1000;
@@ -120,7 +121,7 @@ function textSegment(text: string, color: Color): Segment {
 
 function segmentsFor(view: QuotaView, detail: Detail, now: number): Segment[] {
 	const segments: Segment[] = [];
-	if (detail.title) segments.push({ plain: "Codex", paint: (paint) => paint.bold(paint.fg("text", "Codex")) });
+	if (detail.title) segments.push({ plain: "Codex", paint: (paint) => paint.bold(paint.codexTitle?.() ?? paint.fg("text", "Codex")) });
 	if (view.error) segments.push(textSegment(view.error, "dim"));
 	for (const window of windows(view.usage).slice(-detail.windows)) segments.push(windowSegment(window, now, detail));
 	if (detail.resets && view.resets) {
