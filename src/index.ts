@@ -10,7 +10,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { formatDuration, type Paint, type QuotaView, renderQuota, type UsageResponse } from "./quota.ts";
 import { codexShimmer } from "./shimmer.ts";
@@ -218,7 +218,11 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	pi.on("session_start", async (_event, ctx) => {
-		fast = false;
+		try {
+			fast = JSON.parse(await readFile(join(agentDir(), "codex-plan-settings.json"), "utf8"))?.fast === true;
+		} catch {
+			fast = false;
+		}
 		if (!ctx.hasUI) return;
 		void refresh(ctx);
 		stopTimers();
@@ -248,7 +252,19 @@ export default function (pi: ExtensionAPI) {
 			const command = args.trim().toLowerCase();
 
 			if (command === "fast") {
-				fast = !fast;
+				const next = !fast;
+				const path = join(agentDir(), "codex-plan-settings.json");
+				const temporary = `${path}.${randomUUID()}.tmp`;
+				try {
+					await mkdir(agentDir(), { recursive: true });
+					await writeFile(temporary, JSON.stringify({ fast: next }) + "\n", { mode: 0o600 });
+					await rename(temporary, path);
+				} catch (error) {
+					await unlink(temporary).catch(() => {});
+					ctx.ui.notify(`Could not save Codex fast mode: ${error instanceof Error ? error.message : String(error)}`, "error");
+					return;
+				}
+				fast = next;
 				if (ctx.hasUI) render(ctx, hasLogin);
 				ctx.ui.notify(fast ? "Codex fast mode on (priority processing may cost more)." : "Codex fast mode off.", "info");
 				return;

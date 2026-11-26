@@ -50,7 +50,7 @@ async function setup(t: TestContext) {
 			widget: () => widget,
 			request: (provider: string, api: string) => handlers.get("before_provider_request")({ payload: { stream: true } }, { model: { provider, api } }),
 			notifications,
-			start: async () => { handlers.get("session_start")({}, ctx); tick = poll; await settle(); },
+			start: async () => { await handlers.get("session_start")({}, ctx); tick = poll; await settle(); },
 			turn: async () => { handlers.get("agent_end")({}, ctx); await settle(); },
 			tick: async () => { tick(); await settle(); },
 			command: (args = "") => commands.get("codex").handler(args, ctx),
@@ -82,6 +82,23 @@ test("fast toggles the animated title and priority tier without fetching quota",
 	assert.equal(s.request("openai", "openai-responses"), undefined);
 	assert.equal(s.widget()![0], standard);
 	assert.equal(app.refreshes(), 1);
+});
+
+test("fast mode persists across new sessions, including when disabled", async (t) => {
+	const app = await setup(t);
+	const first = app.session();
+	await first.start();
+	await first.command("fast");
+	assert.deepEqual(JSON.parse(await readFile(join(app.dir, "codex-plan-settings.json"), "utf8")), { fast: true });
+	const second = app.session();
+	await second.start();
+	assert.deepEqual(second.request("openai", "openai-responses"), { stream: true, service_tier: "priority" });
+	assert.match(second.widget()![0], /\x1b\[38;2;/);
+	await second.command("fast");
+	const third = app.session();
+	await third.start();
+	assert.equal(third.request("openai", "openai-responses"), undefined);
+	assert.deepEqual(JSON.parse(await readFile(join(app.dir, "codex-plan-settings.json"), "utf8")), { fast: false });
 });
 
 test("sessions share one snapshot instead of each querying the backend", async (t) => {

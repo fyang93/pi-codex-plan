@@ -30,7 +30,7 @@ pi install git:github.com/fyang93/pi-codex-plan
 | 命令 | 作用 |
 |---|---|
 | `/codex` | 立即刷新额度 |
-| `/codex fast` | 切换当前会话的快速模式（默认关闭）；启用时 Codex 字样会显示彩色动效。仅对支持优先处理的 OpenAI/Codex Responses 模型生效，可能消耗更多额度或产生更高的 API 费用。 |
+| `/codex fast` | 切换全局快速模式（默认关闭），设置会在下次启动时恢复；启用时 Codex 字样会显示彩色动效。仅对支持优先处理的 OpenAI/Codex Responses 模型生效，可能消耗更多额度或产生更高的 API 费用。 |
 | `/codex reset` | 列出重置卡（最快过期的在前）并兑换一张 |
 | `/codex clear` | 关掉兑换后的倒计时 |
 
